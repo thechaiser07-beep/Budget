@@ -113,6 +113,7 @@ svg text{fill:var(--mute);font-size:10px}
   <div class="grid cols">
     <div class="grid">
       <div class="card"><h2>Income</h2><div id="incBox"></div></div>
+      <div class="card"><h2>Recurring</h2><div id="recBox"></div><button class="btn ghost" id="addRec" style="margin-top:12px">+ Add recurring bill or income</button></div>
       <div class="card"><h2>Budgets</h2><div id="buds"></div></div>
       <div class="card"><h2>Spending by category</h2><div id="donut"></div><div class="legend" id="legend"></div></div>
       <div class="card"><h2 id="trendTitle">Last 6 periods</h2><div id="trend"></div></div>
@@ -137,9 +138,22 @@ svg text{fill:var(--mute);font-size:10px}
   <button class="btn ghost" data-close>Cancel</button>
 </div></div>
 
+<div class="sheet-bg" id="recSheet"><div class="sheet">
+  <h3>Recurring bill or income</h3>
+  <div class="seg" id="rTypeSeg"><button data-t="exp" class="on">Expense</button><button data-t="inc" class="inc">Income</button></div>
+  <label>Amount</label><input id="rAmt" type="number" inputmode="decimal" step="0.01" placeholder="0.00">
+  <label>Category</label><select id="rCat"></select>
+  <label>How often</label>
+  <div class="seg" id="rFreqSeg"><button data-f="week">Weekly</button><button data-f="fortnight">Fortnightly</button><button data-f="month" class="on">Monthly</button></div>
+  <label>First due date (past dates get added to your history)</label><input id="rDate" type="date">
+  <label>Name (optional)</label><input id="rNote" placeholder="e.g. Rent, Spotify, Pay">
+  <button class="btn" id="rSave">Save</button>
+  <button class="btn ghost" data-close>Cancel</button>
+</div></div>
+
 <div class="sheet-bg" id="setSheet"><div class="sheet">
   <h3>Settings</h3>
-  <label>Regularity (how you view your budget)</label>
+  <label>Budget view (how totals are grouped)</label>
   <div class="seg" id="perSeg"><button data-p="week">Weekly</button><button data-p="fortnight">Fortnightly</button><button data-p="month">Monthly</button></div>
   <label>Currency symbol</label><input id="sCur" maxlength="3">
   <label id="bLbl">Budgets per period (0 = no limit)</label><div id="bInputs"></div>
@@ -170,8 +184,8 @@ const nice=c=>c.replace("_"," ");
 let S=load(), view=new Date(), ftype="exp";
 
 function load(){
-  try{const d=JSON.parse(localStorage.getItem(KEY));if(d&&d.tx){if(!["week","fortnight","month"].includes(d.period))d.period="month";return d}}catch(e){}
-  return {tx:[],budgets:{},cur:"$",period:"month"};
+  try{const d=JSON.parse(localStorage.getItem(KEY));if(d&&d.tx){if(!["week","fortnight","month"].includes(d.period))d.period="month";if(!Array.isArray(d.rec))d.rec=[];if(!d.posted||typeof d.posted!=="object")d.posted={};return d}}catch(e){}
+  return {tx:[],budgets:{},cur:"$",period:"month",rec:[],posted:{}};
 }
 
 // ---- periods: week (Mon–Sun), fortnight (2-week blocks), month ----
@@ -217,6 +231,7 @@ function render(){
   $("#monthLbl").textContent=label(R);
   $("#trendTitle").textContent="Last 6 "+perName()+"s";
   $("#bLbl").textContent="Budgets per "+perName()+" (0 = no limit)";
+  renderRec(R);
 
   // income card: this period's income + what it works out to per week/fortnight/month
   const days=Math.round((R.e-R.s)/864e5)+1, perDay=inc/days;
@@ -271,6 +286,60 @@ function render(){
     :`<div class="empty">Nothing here yet. Tap + to add one.</div>`;
 }
 
+// ---- recurring bills / income ----
+const FREQ={week:"week",fortnight:"fortnight",month:"month"};
+const FNAME={week:"weekly",fortnight:"fortnightly",month:"monthly"};
+// all due dates (YYYY-MM-DD) of a recurring item from its start up to and including `upTo` (string)
+function occurrences(r,upTo){
+  const out=[],st=new Date(r.start+"T00:00");
+  if(isNaN(st))return out;
+  for(let k=0;k<1500;k++){
+    let d;
+    if(r.freq==="month"){
+      const base=new Date(st.getFullYear(),st.getMonth()+k,1);
+      const last=new Date(base.getFullYear(),base.getMonth()+1,0).getDate();
+      d=new Date(base.getFullYear(),base.getMonth(),Math.min(st.getDate(),last));
+    }else d=addDays(st,k*(r.freq==="week"?7:14));
+    const s=dstr(d);if(s>upTo)break;out.push(s);
+  }
+  return out;
+}
+// add any due occurrences to the transaction list (once each — deleting one won't bring it back)
+function autoPost(){
+  let n=0;const t=today();
+  for(const r of S.rec)for(const dt of occurrences(r,t)){
+    const k=r.id+"|"+dt;
+    if(S.posted[k])continue;
+    S.posted[k]=1;
+    S.tx.push({id:uid(),type:r.type,amt:r.amt,cat:r.cat,date:dt,note:r.note||"",rid:r.id});n++;
+  }
+  if(n)save();
+  return n;
+}
+const perMonth=r=>r.amt*(r.freq==="week"?52/12:r.freq==="fortnight"?26/12:1);
+function renderRec(R){
+  const t=today();
+  if(!S.rec.length){$("#recBox").innerHTML=`<div class="empty" style="padding:6px 0">Add rent, subscriptions, pay… anything that repeats weekly, fortnightly or monthly and it'll be added for you each time.</div>`;return}
+  const rows=S.rec.slice().sort((a,b)=>(a.type===b.type?0:a.type==="inc"?-1:1)||b.amt-a.amt).map(r=>{
+    // next due = first occurrence after today (gaps are at most 31 days, so look 62 days ahead)
+    const nd=occurrences(r,dstr(addDays(new Date(),62))).find(d=>d>t)||"";
+    return `<div class="incrow"><span>${CATS[r.cat]?CATS[r.cat][0]:"📦"} ${esc(r.note||nice(r.cat))}<br><small style="color:var(--mute)">${FNAME[r.freq]}${nd?" · next "+short(new Date(nd+"T00:00")):""}</small></span>
+      <span style="text-align:right"><b class="${r.type==="inc"?"in":"out"}">${r.type==="inc"?"+":"-"}${esc(money(r.amt))}</b><br><button class="x" data-rdel="${r.id}" style="background:none;border:0;color:var(--mute);padding:2px">remove</button></span></div>`;
+  }).join("");
+  const sum=ty=>S.rec.filter(r=>r.type===ty).reduce((a,r)=>a+perMonth(r),0);
+  const eInc=sum("inc"),eOut=sum("exp");
+  // still to come this period (due after today, on or before the period end)
+  let later=0;for(const r of S.rec.filter(r=>r.type==="exp")){later+=occurrences(r,R.b).filter(d=>d>t&&d>=R.a).length*r.amt}
+  $("#recBox").innerHTML=rows+`<div class="eq"><div><small>Bills / mo</small><b class="out">${esc(money(eOut))}</b></div><div><small>Pay / mo</small><b class="in">${esc(money(eInc))}</b></div><div><small>Left over / mo</small><b>${esc(money(eInc-eOut))}</b></div></div>`
+    +(later>0?`<div style="margin-top:10px;color:var(--mute);font-size:13px">Still due this ${perName()}: <b style="color:var(--text)">${esc(money(later))}</b></div>`:"");
+}
+let rtype="exp",rfreq="month";
+function setRType(t){rtype=t;document.querySelectorAll("#rTypeSeg button").forEach(b=>b.classList.toggle("on",b.dataset.t===t));
+  $("#rCat").innerHTML=(t==="inc"?["Income","Other"]:EXP).map(c=>`<option value="${c}">${CATS[c][0]} ${nice(c)}</option>`).join("")}
+function setRFreq(f){rfreq=f;document.querySelectorAll("#rFreqSeg button").forEach(b=>b.classList.toggle("on",b.dataset.f===f))}
+document.querySelectorAll("#rTypeSeg button").forEach(b=>b.onclick=()=>setRType(b.dataset.t));
+document.querySelectorAll("#rFreqSeg button").forEach(b=>b.onclick=()=>setRFreq(b.dataset.f));
+
 // sheets
 const open=id=>$(id).classList.add("on"), close=()=>document.querySelectorAll(".sheet-bg").forEach(s=>s.classList.remove("on"));
 document.querySelectorAll("[data-close]").forEach(b=>b.onclick=close);
@@ -288,6 +357,19 @@ function openTx(t){
   $("#fAmt").value="";$("#fNote").value="";$("#fDate").value=today();
   open("#txSheet");setTimeout(()=>$("#fAmt").focus(),50);
 }
+$("#addRec").onclick=()=>{setRType("exp");setRFreq("month");$("#rAmt").value="";$("#rNote").value="";$("#rDate").value=today();open("#recSheet");setTimeout(()=>$("#rAmt").focus(),50)};
+$("#rSave").onclick=()=>{
+  const amt=parseFloat($("#rAmt").value);
+  if(!(amt>0))return toast("Enter an amount");
+  const start=$("#rDate").value||today();
+  S.rec.push({id:uid(),type:rtype,amt:Math.round(amt*100)/100,cat:$("#rCat").value,note:$("#rNote").value.trim(),freq:rfreq,start});
+  const n=autoPost();save();close();render();toast(n?`Added — ${n} past ${n===1?"entry":"entries"} posted`:"Recurring item added");
+};
+$("#recBox").onclick=e=>{
+  const id=e.target.dataset.rdel;if(!id)return;
+  if(confirm("Stop this recurring item? Past entries stay in your history."))
+  {S.rec=S.rec.filter(r=>r.id!==id);save();render()}
+};
 $("#addExp").onclick=()=>openTx("exp");
 $("#addInc").onclick=()=>openTx("inc");
 $("#fSave").onclick=()=>{
@@ -348,15 +430,19 @@ $("#impFile").onchange=e=>{
       const have=new Set(S.tx.map(t=>t.id));
       let n=0;
       for(const t of d.tx){if(t&&t.id&&t.date&&t.amt>0&&!have.has(t.id)){S.tx.push({id:String(t.id),type:t.type==="inc"?"inc":"exp",amt:+t.amt,cat:CATS[t.cat]?t.cat:"Other",date:String(t.date),note:String(t.note||"")});n++}}
+      if(Array.isArray(d.rec)){const hr=new Set(S.rec.map(r=>r.id));for(const r of d.rec){if(r&&r.id&&r.amt>0&&FNAME[r.freq]&&r.start&&!hr.has(r.id))S.rec.push({id:String(r.id),type:r.type==="inc"?"inc":"exp",amt:+r.amt,cat:CATS[r.cat]?r.cat:"Other",note:String(r.note||""),freq:r.freq,start:String(r.start)})}}
+      if(d.posted&&typeof d.posted==="object")for(const k in d.posted)S.posted[k]=1;
       if(d.budgets&&typeof d.budgets==="object"&&!Object.keys(S.budgets).length){for(const c in d.budgets)if(CATS[c]&&d.budgets[c]>0)S.budgets[c]=+d.budgets[c]}
       save();close();render();toast(`Imported ${n} new`);
     }catch(_){toast("That file isn't a valid backup")}
   };
   r.readAsText(f);e.target.value="";
 };
-$("#wipe").onclick=()=>{if(confirm("Delete ALL data on this device? Export a backup first.")){S={tx:[],budgets:{},cur:S.cur,period:S.period};save();close();render()}};
+$("#wipe").onclick=()=>{if(confirm("Delete ALL data on this device? Export a backup first.")){S={tx:[],budgets:{},cur:S.cur,period:S.period,rec:[],posted:{}};save();close();render()}};
 
-render();
+autoPost();render();
+// pick up newly due recurring items when the app is reopened or comes back to the foreground
+document.addEventListener("visibilitychange",()=>{if(!document.hidden&&autoPost())render()});
 if("serviceWorker"in navigator)addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}));
 </script>
 </body>
