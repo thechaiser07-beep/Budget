@@ -53,9 +53,18 @@ h2{font-size:13px;color:var(--mute);text-transform:uppercase;letter-spacing:.08e
 .bar{height:8px;border-radius:99px;background:rgba(255,255,255,.08);overflow:hidden}
 .bar i{display:block;height:100%;border-radius:99px;background:var(--acc);transition:width .4s}
 .empty{color:var(--mute);text-align:center;padding:18px 0}
-.fab{position:fixed;right:18px;bottom:calc(18px + var(--safe-b));width:58px;height:58px;border-radius:50%;border:0;
-  background:linear-gradient(135deg,var(--acc),var(--acc2));color:#05121a;font-size:30px;font-weight:600;
-  box-shadow:0 10px 30px rgba(96,165,250,.4)}
+.dock{position:fixed;left:0;right:0;bottom:0;display:flex;gap:10px;justify-content:center;
+  padding:12px 14px calc(12px + var(--safe-b));background:linear-gradient(transparent,rgba(11,15,26,.92) 40%);z-index:5}
+.dock button{flex:1;max-width:260px;border:0;border-radius:16px;padding:14px;font-weight:700;font-size:15px;color:#05121a;
+  box-shadow:0 8px 24px rgba(0,0,0,.35)}
+.dock .e{background:linear-gradient(135deg,#fca5a5,#f87171)}
+.dock .i{background:linear-gradient(135deg,var(--acc),#34d399)}
+.incrow{display:flex;justify-content:space-between;padding:7px 0;border-top:1px solid var(--line)}
+.incrow:first-child{border-top:0}
+.eq{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
+.eq div{background:rgba(255,255,255,.05);border-radius:12px;padding:8px;text-align:center}
+.eq small{display:block;color:var(--mute);font-size:11px}
+.eq b{font-size:13px}
 .sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:flex-end;justify-content:center;z-index:10}
 .sheet-bg.on{display:flex}
 .sheet{background:#121829;border:1px solid var(--line);width:100%;max-width:520px;border-radius:24px 24px 0 0;padding:18px 18px calc(18px + var(--safe-b));max-height:92vh;overflow:auto}
@@ -103,18 +112,22 @@ svg text{fill:var(--mute);font-size:10px}
 
   <div class="grid cols">
     <div class="grid">
+      <div class="card"><h2>Income</h2><div id="incBox"></div></div>
       <div class="card"><h2>Budgets</h2><div id="buds"></div></div>
       <div class="card"><h2>Spending by category</h2><div id="donut"></div><div class="legend" id="legend"></div></div>
-      <div class="card"><h2>Last 6 months</h2><div id="trend"></div></div>
+      <div class="card"><h2 id="trendTitle">Last 6 periods</h2><div id="trend"></div></div>
     </div>
     <div class="card"><h2>Transactions</h2><div id="list"></div></div>
   </div>
 </div>
 
-<button class="fab" id="add" aria-label="Add transaction">+</button>
+<div class="dock">
+  <button class="e" id="addExp">− Add expense</button>
+  <button class="i" id="addInc">+ Add income</button>
+</div>
 
 <div class="sheet-bg" id="txSheet"><div class="sheet">
-  <h3>Add transaction</h3>
+  <h3 id="sheetTitle">Add transaction</h3>
   <div class="seg" id="typeSeg"><button data-t="exp" class="on">Expense</button><button data-t="inc" class="inc">Income</button></div>
   <label>Amount</label><input id="fAmt" type="number" inputmode="decimal" step="0.01" placeholder="0.00">
   <label>Category</label><select id="fCat"></select>
@@ -126,8 +139,10 @@ svg text{fill:var(--mute);font-size:10px}
 
 <div class="sheet-bg" id="setSheet"><div class="sheet">
   <h3>Settings</h3>
+  <label>Regularity (how you view your budget)</label>
+  <div class="seg" id="perSeg"><button data-p="week">Weekly</button><button data-p="fortnight">Fortnightly</button><button data-p="month">Monthly</button></div>
   <label>Currency symbol</label><input id="sCur" maxlength="3">
-  <label>Monthly budgets (0 = no limit)</label><div id="bInputs"></div>
+  <label id="bLbl">Budgets per period (0 = no limit)</label><div id="bInputs"></div>
   <button class="btn" id="sSave">Save</button>
   <button class="btn ghost" id="exJson">Export backup (JSON)</button>
   <button class="btn ghost" id="exCsv">Export CSV</button>
@@ -153,21 +168,44 @@ const $=s=>document.querySelector(s);
 const nice=c=>c.replace("_"," ");
 
 let S=load(), view=new Date(), ftype="exp";
-view.setDate(1);
 
 function load(){
-  try{const d=JSON.parse(localStorage.getItem(KEY));if(d&&d.tx)return d}catch(e){}
-  return {tx:[],budgets:{},cur:"$"};
+  try{const d=JSON.parse(localStorage.getItem(KEY));if(d&&d.tx){if(!["week","fortnight","month"].includes(d.period))d.period="month";return d}}catch(e){}
+  return {tx:[],budgets:{},cur:"$",period:"month"};
 }
+
+// ---- periods: week (Mon–Sun), fortnight (2-week blocks), month ----
+const PER={week:"week",fortnight:"fortnight",month:"month"};
+const EPOCH=new Date(2024,0,1); // a Monday; fortnights count from here
+const dstr=d=>d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+const addDays=(d,n)=>new Date(d.getFullYear(),d.getMonth(),d.getDate()+n);
+function range(d){
+  let s,e;
+  if(S.period==="month"){s=new Date(d.getFullYear(),d.getMonth(),1);e=new Date(d.getFullYear(),d.getMonth()+1,0)}
+  else if(S.period==="week"){s=addDays(d,-((d.getDay()+6)%7));e=addDays(s,6)}
+  else{
+    const days=Math.round((new Date(d.getFullYear(),d.getMonth(),d.getDate())-EPOCH)/864e5);
+    s=addDays(EPOCH,Math.floor(days/14)*14);e=addDays(s,13);
+  }
+  return {s,e,a:dstr(s),b:dstr(e)};
+}
+function shift(d,n){
+  if(S.period==="month")return new Date(d.getFullYear(),d.getMonth()+n,1);
+  return addDays(d,n*(S.period==="week"?7:14));
+}
+const short=d=>d.toLocaleDateString(undefined,{day:"numeric",month:"short"});
+function label(r){
+  return S.period==="month"?r.s.toLocaleDateString(undefined,{month:"long",year:"numeric"}):short(r.s)+" – "+short(r.e);
+}
+const perName=()=>({week:"week",fortnight:"fortnight",month:"month"}[S.period]);
 function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){toast("Couldn't save — storage full or blocked")}}
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
 const money=n=>(n<0?"-":"")+S.cur+Math.abs(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
-const ym=d=>d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
-const today=()=>{const d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")};
+const today=()=>dstr(new Date());
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("on");clearTimeout(toast.t);toast.t=setTimeout(()=>t.classList.remove("on"),2200)}
 
-function monthTx(key){return S.tx.filter(t=>t.date.startsWith(key)).sort((a,b)=>b.date.localeCompare(a.date)||b.id.localeCompare(a.id))}
+function periodTx(r){return S.tx.filter(t=>t.date>=r.a&&t.date<=r.b).sort((a,b)=>b.date.localeCompare(a.date)||b.id.localeCompare(a.id))}
 function sums(list){
   let inc=0,out=0;const by={};
   for(const t of list){ if(t.type==="inc")inc+=t.amt; else{out+=t.amt;by[t.cat]=(by[t.cat]||0)+t.amt} }
@@ -175,8 +213,17 @@ function sums(list){
 }
 
 function render(){
-  const key=ym(view), list=monthTx(key), {inc,out,by}=sums(list);
-  $("#monthLbl").textContent=view.toLocaleDateString(undefined,{month:"long",year:"numeric"});
+  const R=range(view), list=periodTx(R), {inc,out,by}=sums(list);
+  $("#monthLbl").textContent=label(R);
+  $("#trendTitle").textContent="Last 6 "+perName()+"s";
+  $("#bLbl").textContent="Budgets per "+perName()+" (0 = no limit)";
+
+  // income card: this period's income + what it works out to per week/fortnight/month
+  const days=Math.round((R.e-R.s)/864e5)+1, perDay=inc/days;
+  const incs=list.filter(t=>t.type==="inc");
+  $("#incBox").innerHTML=(incs.length?incs.map(t=>`<div class="incrow"><span>${esc(t.note||nice(t.cat))} <small style="color:var(--mute)">· ${short(new Date(t.date+"T00:00"))}</small></span><b class="in">+${esc(money(t.amt))}</b></div>`).join("")
+    :`<div class="empty" style="padding:6px 0">No income this ${perName()} yet</div>`)
+    +`<div class="eq"><div><small>Per week</small><b>${esc(money(perDay*7))}</b></div><div><small>Per fortnight</small><b>${esc(money(perDay*14))}</b></div><div><small>Per month</small><b>${esc(money(perDay*365/12))}</b></div></div>`;
   $("#sIn").textContent=money(inc);
   $("#sOut").textContent=money(out);
   const left=inc-out, el=$("#sLeft");
@@ -204,14 +251,13 @@ function render(){
   }
 
   // trend
-  const months=[];for(let i=5;i>=0;i--){const d=new Date(view.getFullYear(),view.getMonth()-i,1);months.push(d)}
-  const data=months.map(d=>{const s=sums(monthTx(ym(d)));return {d,inc:s.inc,out:s.out}});
+  const data=[5,4,3,2,1,0].map(i=>{const r=range(shift(view,-i)),s=sums(periodTx(r));return {d:r.s,inc:s.inc,out:s.out}});
   const mx=Math.max(1,...data.flatMap(x=>[x.inc,x.out]));
   $("#trend").innerHTML=`<svg viewBox="0 0 300 130">${data.map((x,i)=>{
     const bx=i*50+8,h1=x.inc/mx*90,h2=x.out/mx*90;
     return `<rect x="${bx}" y="${100-h1}" width="14" height="${h1}" rx="3" fill="var(--acc)"/>
       <rect x="${bx+16}" y="${100-h2}" width="14" height="${h2}" rx="3" fill="var(--bad)"/>
-      <text x="${bx+15}" y="118" text-anchor="middle">${x.d.toLocaleDateString(undefined,{month:"short"})}</text>`}).join("")}</svg>
+      <text x="${bx+15}" y="118" text-anchor="middle">${S.period==="month"?x.d.toLocaleDateString(undefined,{month:"short"}):short(x.d)}</text>`}).join("")}</svg>
     <div class="legend"><span><i style="background:var(--acc)"></i>Income</span><span><i style="background:var(--bad)"></i>Spent</span></div>`;
 
   // list
@@ -237,14 +283,20 @@ function setType(t){
 }
 document.querySelectorAll("#typeSeg button").forEach(b=>b.onclick=()=>setType(b.dataset.t));
 
-$("#add").onclick=()=>{setType("exp");$("#fAmt").value="";$("#fNote").value="";$("#fDate").value=today();open("#txSheet");setTimeout(()=>$("#fAmt").focus(),50)};
+function openTx(t){
+  setType(t);$("#sheetTitle").textContent=t==="inc"?"Add income":"Add expense";
+  $("#fAmt").value="";$("#fNote").value="";$("#fDate").value=today();
+  open("#txSheet");setTimeout(()=>$("#fAmt").focus(),50);
+}
+$("#addExp").onclick=()=>openTx("exp");
+$("#addInc").onclick=()=>openTx("inc");
 $("#fSave").onclick=()=>{
   const amt=parseFloat($("#fAmt").value);
   if(!(amt>0))return toast("Enter an amount");
   const date=$("#fDate").value||today();
   S.tx.push({id:uid(),type:ftype,amt:Math.round(amt*100)/100,cat:$("#fCat").value,date,note:$("#fNote").value.trim()});
   save();
-  const d=new Date(date+"T00:00");view=new Date(d.getFullYear(),d.getMonth(),1);
+  view=new Date(date+"T00:00");
   close();render();toast("Added");
 };
 $("#fAmt").addEventListener("keydown",e=>{if(e.key==="Enter")$("#fSave").click()});
@@ -252,17 +304,25 @@ $("#list").onclick=e=>{
   const id=e.target.dataset.del;if(!id)return;
   if(confirm("Delete this transaction?")){S.tx=S.tx.filter(t=>t.id!==id);save();render()}
 };
-$("#prev").onclick=()=>{view=new Date(view.getFullYear(),view.getMonth()-1,1);render()};
-$("#next").onclick=()=>{view=new Date(view.getFullYear(),view.getMonth()+1,1);render()};
+$("#prev").onclick=()=>{view=shift(view,-1);render()};
+$("#next").onclick=()=>{view=shift(view,1);render()};
 
 // settings
+let pendingPer="month";
+function setPer(p){
+  pendingPer=p;
+  document.querySelectorAll("#perSeg button").forEach(b=>b.classList.toggle("on",b.dataset.p===p));
+}
+document.querySelectorAll("#perSeg button").forEach(b=>b.onclick=()=>setPer(b.dataset.p));
 $("#gear").onclick=()=>{
+  setPer(S.period);
   $("#sCur").value=S.cur;
   $("#bInputs").innerHTML=EXP.map(c=>`<div class="brow"><span>${CATS[c][0]} ${nice(c)}</span><input type="number" inputmode="decimal" min="0" data-b="${c}" value="${S.budgets[c]||""}" placeholder="0"></div>`).join("");
   open("#setSheet");
 };
 $("#sSave").onclick=()=>{
   S.cur=$("#sCur").value.trim()||"$";
+  if(S.period!==pendingPer){S.period=pendingPer;view=new Date()}
   S.budgets={};
   document.querySelectorAll("[data-b]").forEach(i=>{const v=parseFloat(i.value);if(v>0)S.budgets[i.dataset.b]=v});
   save();close();render();toast("Saved");
@@ -294,7 +354,7 @@ $("#impFile").onchange=e=>{
   };
   r.readAsText(f);e.target.value="";
 };
-$("#wipe").onclick=()=>{if(confirm("Delete ALL data on this device? Export a backup first.")){S={tx:[],budgets:{},cur:S.cur};save();close();render()}};
+$("#wipe").onclick=()=>{if(confirm("Delete ALL data on this device? Export a backup first.")){S={tx:[],budgets:{},cur:S.cur,period:S.period};save();close();render()}};
 
 render();
 if("serviceWorker"in navigator)addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}));
