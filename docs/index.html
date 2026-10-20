@@ -90,6 +90,38 @@ svg text{fill:var(--mute);font-size:10px}
 .legend i{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:5px}
 .toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:#1c2440;border:1px solid var(--line);padding:10px 16px;border-radius:12px;opacity:0;pointer-events:none;transition:.3s;z-index:20}
 .toast.on{opacity:1}
+[hidden]{display:none!important}
+.tabs{display:flex;gap:6px;background:rgba(255,255,255,.06);border:1px solid var(--line);border-radius:14px;padding:4px;margin-bottom:14px}
+.tabs button{flex:1;border:0;background:none;padding:10px;border-radius:10px;font-weight:600;color:var(--mute)}
+.tabs button.on{background:rgba(255,255,255,.12);color:var(--text)}
+.tools{display:flex;gap:10px;align-items:center;margin:12px 0}
+.tools .seg{flex:1}.tools .seg button{font-size:13px;padding:8px 4px}
+.tools .btn{margin:0;width:auto;padding:11px 16px;white-space:nowrap}
+.bgrid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));align-items:start}
+.bc{cursor:pointer;padding:14px}
+.bc .top{display:flex;align-items:center;gap:12px}
+.bc .ring{flex:none;width:64px;height:64px;position:relative}
+.bc .ring b{position:absolute;inset:0;display:grid;place-items:center;font-size:13px}
+.bc .nm{flex:1;min-width:0}
+.bc .nm .t{font-weight:700;font-size:16px}
+.bc .nm small{color:var(--mute);display:block}
+.chip{display:inline-block;font-size:11px;padding:2px 9px;border-radius:99px;border:1px solid currentColor;margin-top:5px}
+.bc .line{margin-top:10px;color:var(--mute)}
+.bc .line b{color:var(--text)}
+.pace{margin-top:6px;font-size:13px}
+.warn{color:var(--warn)}
+.bc .more{margin-top:12px;border-top:1px solid var(--line);padding-top:10px;cursor:default}
+.bc .more h4{margin:12px 0 6px;font-size:12px;color:var(--mute);font-weight:600;text-transform:uppercase;letter-spacing:.06em}
+.bc .more h4:first-child{margin-top:0}
+.btx{display:flex;justify-content:space-between;gap:8px;padding:5px 0;font-size:14px}
+.btx span:first-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.btx small{color:var(--mute)}
+.acts{display:flex;gap:8px;margin-top:12px}
+.acts .btn{margin:0;padding:10px;font-size:13px}
+.unb{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--line)}
+.unb:first-of-type{border-top:0}
+.unb span{flex:1}
+.unb button{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:7px 12px;font-size:13px}
 </style>
 </head>
 <body>
@@ -104,6 +136,9 @@ svg text{fill:var(--mute);font-size:10px}
     <button class="ib" id="gear" aria-label="Settings">⚙︎</button>
   </header>
 
+  <nav class="tabs"><button data-pg="home" class="on">Overview</button><button data-pg="budgets">Budgets</button></nav>
+
+  <div id="pgHome">
   <div class="grid stats">
     <div class="card stat"><small>Income</small><div class="v in" id="sIn"></div></div>
     <div class="card stat"><small>Spent</small><div class="v out" id="sOut"></div></div>
@@ -119,6 +154,18 @@ svg text{fill:var(--mute);font-size:10px}
       <div class="card"><h2 id="trendTitle">Last 6 periods</h2><div id="trend"></div></div>
     </div>
     <div class="card"><h2>Transactions</h2><div id="list"></div></div>
+  </div>
+  </div>
+
+  <div id="pgBud" hidden>
+    <div class="grid stats" id="bSum"></div>
+    <div id="bNote" style="color:var(--mute);margin:10px 2px 0;font-size:13px"></div>
+    <div class="tools">
+      <div class="seg" id="sortSeg"><button data-s="full">Most used</button><button data-s="left">Least left</button><button data-s="name">A–Z</button></div>
+      <button class="btn" id="newBud">+ New</button>
+    </div>
+    <div class="bgrid" id="bCards"></div>
+    <div class="card" id="bUnCard" style="margin-top:12px" hidden><h2>Spending with no budget</h2><div id="bUn"></div></div>
   </div>
 </div>
 
@@ -148,6 +195,16 @@ svg text{fill:var(--mute);font-size:10px}
   <label>First due date (past dates get added to your history)</label><input id="rDate" type="date">
   <label>Name (optional)</label><input id="rNote" placeholder="e.g. Rent, Spotify, Pay">
   <button class="btn" id="rSave">Save</button>
+  <button class="btn ghost" data-close>Cancel</button>
+</div></div>
+
+<div class="sheet-bg" id="bSheet"><div class="sheet">
+  <h3 id="bTitle">New budget</h3>
+  <label>Category</label><select id="bCat"></select>
+  <label id="bAmtLbl">Limit per period</label><input id="bAmt" type="number" inputmode="decimal" min="0" step="1" placeholder="0">
+  <button class="btn ghost" id="bAvg" hidden></button>
+  <button class="btn" id="bSave">Save</button>
+  <button class="btn ghost danger" id="bDel" hidden>Remove budget</button>
   <button class="btn ghost" data-close>Cancel</button>
 </div></div>
 
@@ -232,6 +289,7 @@ function render(){
   $("#trendTitle").textContent="Last 6 "+perName()+"s";
   $("#bLbl").textContent="Budgets per "+perName()+" (0 = no limit)";
   renderRec(R);
+  renderBudgets(R,by);
 
   // income card: this period's income + what it works out to per week/fortnight/month
   const days=Math.round((R.e-R.s)/864e5)+1, perDay=inc/days;
@@ -340,6 +398,120 @@ function setRFreq(f){rfreq=f;document.querySelectorAll("#rFreqSeg button").forEa
 document.querySelectorAll("#rTypeSeg button").forEach(b=>b.onclick=()=>setRType(b.dataset.t));
 document.querySelectorAll("#rFreqSeg button").forEach(b=>b.onclick=()=>setRFreq(b.dataset.f));
 
+// ---- budgets page ----
+let page=location.hash==="#/budgets"?"budgets":"home", openCard=null, bEdit=null;
+function go(p){
+  page=p;
+  $("#pgHome").hidden=p!=="home";$("#pgBud").hidden=p!=="budgets";
+  document.querySelectorAll(".tabs button").forEach(b=>b.classList.toggle("on",b.dataset.pg===p));
+  try{history.replaceState(null,"",p==="budgets"?"#/budgets":location.pathname+location.search)}catch(e){}
+  try{window.scrollTo(0,0)}catch(e){}
+}
+document.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>go(b.dataset.pg));
+addEventListener("hashchange",()=>{const p=location.hash==="#/budgets"?"budgets":"home";if(p!==page)go(p)});
+
+const bstat=(sp,lim)=>sp>lim?["Over budget","var(--bad)"]:sp/lim>=.8?["Getting close","var(--warn)"]:["On track","var(--acc)"];
+
+function renderBudgets(R,by){
+  const m=n=>esc(money(n));
+  const t0=new Date();t0.setHours(0,0,0,0);
+  const cur=t0>=R.s&&t0<=R.e;
+  const totalDays=Math.round((R.e-R.s)/864e5)+1;
+  const elapsed=cur?Math.round((t0-R.s)/864e5)+1:totalDays;
+  const daysLeft=cur?Math.round((R.e-t0)/864e5)+1:0;
+  const rows=Object.keys(S.budgets).filter(c=>S.budgets[c]>0&&CATS[c]).map(c=>({c,lim:S.budgets[c],sp:by[c]||0}));
+  const sorters={full:(a,b)=>b.sp/b.lim-a.sp/a.lim,left:(a,b)=>(a.lim-a.sp)-(b.lim-b.sp),name:(a,b)=>a.c.localeCompare(b.c)};
+  rows.sort(sorters[S.bsort]||sorters.full);
+  document.querySelectorAll("#sortSeg button").forEach(b=>b.classList.toggle("on",b.dataset.s===(sorters[S.bsort]?S.bsort:"full")));
+
+  // summary
+  const B=rows.reduce((a,r)=>a+r.lim,0),Sp=rows.reduce((a,r)=>a+r.sp,0),L=B-Sp;
+  $("#bSum").innerHTML=rows.length?`<div class="card stat"><small>Budgeted</small><div class="v">${m(B)}</div></div>
+    <div class="card stat"><small>Spent</small><div class="v out">${m(Sp)}</div></div>
+    <div class="card stat"><small>${L<0?"Over by":"Left"}</small><div class="v ${L<0?"out":"in"}">${m(Math.abs(L))}</div></div>`:"";
+  const over=rows.filter(r=>r.sp>r.lim).length;
+  $("#bNote").textContent=!rows.length?"":(cur&&daysLeft>0&&L>0?`${daysLeft} ${daysLeft===1?"day":"days"} left this ${perName()} · about ${money(L/daysLeft)}/day across all budgets`:"")
+    +(over?`${cur&&daysLeft>0&&L>0?" · ":""}${over} over budget`:"");
+
+  // cards
+  const C=2*Math.PI*26;
+  $("#bCards").innerHTML=rows.length?rows.map(r=>{
+    const {c,lim,sp}=r,rem=lim-sp,p=sp/lim*100,[txt,col]=bstat(sp,lim),dash=Math.min(1,sp/lim)*C;
+    const line=rem<0?`Over by <b class="out">${m(-rem)}</b>`:(cur&&daysLeft>0?`<b>${m(rem)}</b> left · ${m(rem/daysLeft)}/day`:`<b>${m(rem)}</b> left`);
+    let pace="";
+    if(cur&&elapsed>=2&&sp>0&&sp<=lim){const proj=sp/elapsed*totalDays;if(proj>lim)pace=`<div class="pace warn">⚠ On pace for ${m(proj)}</div>`}
+    let more="";
+    if(openCard===c){
+      const txs=periodTx(R).filter(t=>t.type==="exp"&&t.cat===c).slice(0,8);
+      const hist=[5,4,3,2,1,0].map(i=>sums(periodTx(range(shift(view,-i)))).by[c]||0);
+      const mx=Math.max(lim,...hist)*1.05;
+      const bars=hist.map((v,i)=>{const h=Math.max(v>0?2:0,v/mx*34);return `<rect x="${i*20+2}" y="${36-h}" width="14" height="${h}" rx="3" fill="${v>lim?"var(--bad)":"var(--acc2)"}" opacity="${i===5?1:.5}"/>`}).join("");
+      const ly=36-lim/mx*34;
+      more=`<div class="more" data-stop>
+        <h4>This ${perName()}</h4>
+        ${txs.length?txs.map(t=>`<div class="btx"><span>${esc(t.note||nice(t.cat))} <small>· ${short(new Date(t.date+"T00:00"))}</small></span><span>-${m(t.amt)}</span></div>`).join(""):`<div style="color:var(--mute)">Nothing spent yet</div>`}
+        <h4>Last 6 ${perName()}s</h4>
+        <svg viewBox="0 0 120 40" style="width:100%;max-width:240px;display:block">${bars}<line x1="0" x2="120" y1="${ly}" y2="${ly}" stroke="var(--mute)" stroke-dasharray="3 3" stroke-width=".8"/></svg>
+        <div class="acts"><button class="btn" data-act="add" data-c="${c}">+ Expense</button><button class="btn ghost" data-act="edit" data-c="${c}">Edit limit</button></div>
+      </div>`;
+    }
+    return `<div class="card bc" data-card="${c}">
+      <div class="top">
+        <div class="ring"><svg viewBox="0 0 64 64" width="64" height="64"><circle cx="32" cy="32" r="26" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="7"/>
+          <circle cx="32" cy="32" r="26" fill="none" stroke="${col}" stroke-width="7" stroke-linecap="round" stroke-dasharray="${dash} ${C-dash}" transform="rotate(-90 32 32)"/></svg><b>${Math.round(p)}%</b></div>
+        <div class="nm"><div class="t">${CATS[c][0]} ${nice(c)}</div><small>${m(sp)} of ${m(lim)}</small><span class="chip" style="color:${col}">${txt}</span></div>
+      </div>
+      <div class="line">${line}</div>${pace}${more}</div>`;
+  }).join(""):`<div class="card empty" style="grid-column:1/-1">No budgets yet.<br>Tap <b>+ New</b> to set a spending limit for a category.</div>`;
+
+  // spending that has no budget yet
+  const un=Object.entries(by).filter(([c,v])=>v>0&&!(S.budgets[c]>0)).sort((a,b)=>b[1]-a[1]);
+  $("#bUnCard").hidden=!un.length;
+  $("#bUn").innerHTML=un.map(([c,v])=>`<div class="unb"><span>${CATS[c][0]} ${nice(c)} <small style="color:var(--mute)">· ${m(v)}</small></span><button data-un="${c}" data-v="${Math.ceil(v/10)*10}">Set budget</button></div>`).join("");
+}
+$("#sortSeg").onclick=e=>{const s=e.target.dataset.s;if(s){S.bsort=s;save();render()}};
+$("#bCards").onclick=e=>{
+  const a=e.target.closest("[data-act]");
+  if(a){a.dataset.act==="add"?openTx("exp",a.dataset.c):openBud(a.dataset.c);return}
+  if(e.target.closest("[data-stop]"))return;
+  const card=e.target.closest("[data-card]");
+  if(card){const c=card.dataset.card;openCard=openCard===c?null:c;render()}
+};
+$("#bUn").onclick=e=>{const c=e.target.dataset.un;if(c)openBud(c,+e.target.dataset.v)};
+$("#newBud").onclick=()=>openBud();
+
+function avgHint(){
+  const c=$("#bCat").value;
+  const v=[1,2,3].map(i=>sums(periodTx(range(shift(view,-i)))).by[c]||0);
+  const avg=Math.round(v.reduce((a,b)=>a+b,0)/3),b=$("#bAvg");
+  b.hidden=!(avg>0);b.dataset.v=avg;b.textContent="Use your recent average: "+money(avg)+" per "+perName();
+}
+function openBud(c,amt){
+  bEdit=c&&S.budgets[c]>0?c:null;
+  const opts=bEdit?[bEdit]:EXP.filter(x=>!(S.budgets[x]>0));
+  if(!opts.length)return toast("Every category already has a budget");
+  $("#bCat").innerHTML=opts.map(x=>`<option value="${x}">${CATS[x][0]} ${nice(x)}</option>`).join("");
+  $("#bCat").value=c&&opts.includes(c)?c:opts[0];
+  $("#bCat").disabled=!!bEdit;
+  $("#bTitle").textContent=bEdit?"Edit budget":"New budget";
+  $("#bAmtLbl").textContent="Limit per "+perName();
+  $("#bAmt").value=bEdit?S.budgets[bEdit]:(amt||"");
+  $("#bDel").hidden=!bEdit;
+  avgHint();open("#bSheet");setTimeout(()=>$("#bAmt").focus(),50);
+}
+$("#bCat").onchange=avgHint;
+$("#bAvg").onclick=e=>{$("#bAmt").value=e.currentTarget.dataset.v};
+$("#bSave").onclick=()=>{
+  const v=parseFloat($("#bAmt").value);
+  if(!(v>0))return toast("Enter a limit above 0");
+  S.budgets[$("#bCat").value]=Math.round(v*100)/100;
+  save();close();render();toast("Budget saved");
+};
+$("#bAmt").addEventListener("keydown",e=>{if(e.key==="Enter")$("#bSave").click()});
+$("#bDel").onclick=()=>{
+  if(confirm("Remove this budget? Your transactions are kept.")){delete S.budgets[bEdit];openCard=null;save();close();render();toast("Budget removed")}
+};
+
 // sheets
 const open=id=>$(id).classList.add("on"), close=()=>document.querySelectorAll(".sheet-bg").forEach(s=>s.classList.remove("on"));
 document.querySelectorAll("[data-close]").forEach(b=>b.onclick=close);
@@ -352,8 +524,9 @@ function setType(t){
 }
 document.querySelectorAll("#typeSeg button").forEach(b=>b.onclick=()=>setType(b.dataset.t));
 
-function openTx(t){
+function openTx(t,cat){
   setType(t);$("#sheetTitle").textContent=t==="inc"?"Add income":"Add expense";
+  if(cat&&[...$("#fCat").options].some(o=>o.value===cat))$("#fCat").value=cat;
   $("#fAmt").value="";$("#fNote").value="";$("#fDate").value=today();
   open("#txSheet");setTimeout(()=>$("#fAmt").focus(),50);
 }
@@ -440,7 +613,7 @@ $("#impFile").onchange=e=>{
 };
 $("#wipe").onclick=()=>{if(confirm("Delete ALL data on this device? Export a backup first.")){S={tx:[],budgets:{},cur:S.cur,period:S.period,rec:[],posted:{}};save();close();render()}};
 
-autoPost();render();
+autoPost();go(page);render();
 // pick up newly due recurring items when the app is reopened or comes back to the foreground
 document.addEventListener("visibilitychange",()=>{if(!document.hidden&&autoPost())render()});
 if("serviceWorker"in navigator)addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}));
