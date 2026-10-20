@@ -48,6 +48,12 @@ h2{font-size:13px;color:var(--mute);text-transform:uppercase;letter-spacing:.08e
 .tx .m small{color:var(--mute)}
 .tx .a{font-weight:600;white-space:nowrap}
 .tx .x{background:none;border:0;color:var(--mute);padding:6px;font-size:16px}
+.tx[data-edit]{cursor:pointer}
+.filt{display:flex;gap:8px;margin-bottom:6px}
+.filt input{flex:1;min-width:0;padding:10px}
+.filt select{width:auto;max-width:45%;padding:10px}
+#fInfo{color:var(--mute);font-size:12px;margin:0 2px 4px}
+#fInfo:empty{display:none}
 .bud{margin:12px 0}
 .bud .row{display:flex;justify-content:space-between;margin-bottom:6px}
 .bar{height:8px;border-radius:99px;background:rgba(255,255,255,.08);overflow:hidden}
@@ -149,11 +155,13 @@ svg text{fill:var(--mute);font-size:10px}
     <div class="grid">
       <div class="card"><h2>Income</h2><div id="incBox"></div></div>
       <div class="card"><h2>Recurring</h2><div id="recBox"></div><button class="btn ghost" id="addRec" style="margin-top:12px">+ Add recurring bill or income</button></div>
-      <div class="card"><h2>Budgets</h2><div id="buds"></div></div>
       <div class="card"><h2>Spending by category</h2><div id="donut"></div><div class="legend" id="legend"></div></div>
       <div class="card"><h2 id="trendTitle">Last 6 periods</h2><div id="trend"></div></div>
     </div>
-    <div class="card"><h2>Transactions</h2><div id="list"></div></div>
+    <div class="card"><h2>Transactions <span style="text-transform:none;letter-spacing:0;font-weight:400">· tap to edit</span></h2>
+      <div class="filt"><input id="fq" type="search" placeholder="Search…" aria-label="Search transactions"><select id="fcat" aria-label="Filter by category"></select></div>
+      <div id="fInfo"></div>
+      <div id="list"></div></div>
   </div>
   </div>
 
@@ -302,15 +310,6 @@ function render(){
   const left=inc-out, el=$("#sLeft");
   el.textContent=money(left);el.className="v "+(left<0?"out":"in");
 
-  // budgets
-  const bk=Object.keys(S.budgets).filter(c=>S.budgets[c]>0);
-  $("#buds").innerHTML=bk.length?bk.map(c=>{
-    const lim=S.budgets[c],sp=by[c]||0,p=Math.min(100,sp/lim*100);
-    const col=sp>lim?"var(--bad)":p>80?"var(--warn)":"var(--acc)";
-    return `<div class="bud"><div class="row"><span>${CATS[c][0]} ${nice(c)}</span><span>${money(sp)} / ${money(lim)}</span></div>
-      <div class="bar"><i style="width:${p}%;background:${col}"></i></div></div>`}).join("")
-    :`<div class="empty">No budgets yet — set some in ⚙︎ Settings</div>`;
-
   // donut
   const ents=Object.entries(by).sort((a,b)=>b[1]-a[1]);
   if(!ents.length){$("#donut").innerHTML=`<div class="empty">No spending this month</div>`;$("#legend").innerHTML=""}
@@ -334,15 +333,22 @@ function render(){
     <div class="legend"><span><i style="background:var(--acc)"></i>Income</span><span><i style="background:var(--bad)"></i>Spent</span></div>`;
 
   // list
-  $("#list").innerHTML=list.length?list.map(t=>{
+  const q=$("#fq").value.trim().toLowerCase(), fc=$("#fcat").value;
+  const shown=list.filter(t=>(!fc||t.cat===fc)&&(!q||(t.note||"").toLowerCase().includes(q)||nice(t.cat).toLowerCase().includes(q)));
+  const filtering=!!(q||fc), shownOut=shown.filter(t=>t.type==="exp").reduce((a,t)=>a+t.amt,0);
+  $("#fInfo").textContent=filtering&&list.length?`Showing ${shown.length} of ${list.length}`+(shownOut>0?` · spent ${money(shownOut)}`:""):"";
+  $("#list").innerHTML=shown.length?shown.map(t=>{
     const [ic]=CATS[t.cat]||["📦"];
     const d=new Date(t.date+"T00:00").toLocaleDateString(undefined,{day:"numeric",month:"short"});
-    return `<div class="tx"><div class="dot">${ic}</div>
+    return `<div class="tx" data-edit="${t.id}"><div class="dot">${ic}</div>
       <div class="m"><div>${esc(t.note||nice(t.cat))}</div><small>${nice(t.cat)} · ${d}</small></div>
       <div class="a ${t.type==="inc"?"in":""}">${t.type==="inc"?"+":"-"}${esc(money(t.amt))}</div>
       <button class="x" data-del="${t.id}" aria-label="Delete">✕</button></div>`}).join("")
-    :`<div class="empty">Nothing here yet. Tap + to add one.</div>`;
+    :`<div class="empty">${list.length?"No matches.":"Nothing here yet. Tap + to add one."}</div>`;
 }
+$("#fcat").innerHTML=`<option value="">All</option>`+Object.keys(CATS).map(c=>`<option value="${c}">${CATS[c][0]} ${nice(c)}</option>`).join("");
+$("#fq").addEventListener("input",()=>render());
+$("#fcat").addEventListener("change",()=>render());
 
 // ---- recurring bills / income ----
 const FREQ={week:"week",fortnight:"fortnight",month:"month"};
@@ -517,18 +523,27 @@ const open=id=>$(id).classList.add("on"), close=()=>document.querySelectorAll(".
 document.querySelectorAll("[data-close]").forEach(b=>b.onclick=close);
 document.querySelectorAll(".sheet-bg").forEach(b=>b.addEventListener("click",e=>{if(e.target===b)close()}));
 
+let editId=null;
 function setType(t){
   ftype=t;
+  $("#sheetTitle").textContent=(editId?"Edit ":"Add ")+(t==="inc"?"income":"expense");
   document.querySelectorAll("#typeSeg button").forEach(b=>b.classList.toggle("on",b.dataset.t===t));
   $("#fCat").innerHTML=(t==="inc"?["Income","Other"]:EXP).map(c=>`<option value="${c}">${CATS[c][0]} ${nice(c)}</option>`).join("");
 }
 document.querySelectorAll("#typeSeg button").forEach(b=>b.onclick=()=>setType(b.dataset.t));
 
 function openTx(t,cat){
-  setType(t);$("#sheetTitle").textContent=t==="inc"?"Add income":"Add expense";
+  editId=null;setType(t);
   if(cat&&[...$("#fCat").options].some(o=>o.value===cat))$("#fCat").value=cat;
   $("#fAmt").value="";$("#fNote").value="";$("#fDate").value=today();
   open("#txSheet");setTimeout(()=>$("#fAmt").focus(),50);
+}
+function openEdit(id){
+  const t=S.tx.find(x=>x.id===id);if(!t)return;
+  editId=id;setType(t.type);
+  $("#fCat").value=t.cat;if(!$("#fCat").value)$("#fCat").value=$("#fCat").options[0].value;
+  $("#fAmt").value=t.amt;$("#fNote").value=t.note||"";$("#fDate").value=t.date;
+  open("#txSheet");
 }
 $("#addRec").onclick=()=>{setRType("exp");setRFreq("month");$("#rAmt").value="";$("#rNote").value="";$("#rDate").value=today();open("#recSheet");setTimeout(()=>$("#rAmt").focus(),50)};
 $("#rSave").onclick=()=>{
@@ -549,15 +564,19 @@ $("#fSave").onclick=()=>{
   const amt=parseFloat($("#fAmt").value);
   if(!(amt>0))return toast("Enter an amount");
   const date=$("#fDate").value||today();
-  S.tx.push({id:uid(),type:ftype,amt:Math.round(amt*100)/100,cat:$("#fCat").value,date,note:$("#fNote").value.trim()});
+  const fields={type:ftype,amt:Math.round(amt*100)/100,cat:$("#fCat").value,date,note:$("#fNote").value.trim()};
+  const t=editId&&S.tx.find(x=>x.id===editId), edited=!!t;
+  if(t)Object.assign(t,fields);else S.tx.push({id:uid(),...fields});
+  editId=null;
   save();
   view=new Date(date+"T00:00");
-  close();render();toast("Added");
+  close();render();toast(edited?"Saved":"Added");
 };
 $("#fAmt").addEventListener("keydown",e=>{if(e.key==="Enter")$("#fSave").click()});
 $("#list").onclick=e=>{
-  const id=e.target.dataset.del;if(!id)return;
-  if(confirm("Delete this transaction?")){S.tx=S.tx.filter(t=>t.id!==id);save();render()}
+  const id=e.target.dataset.del;
+  if(id){if(confirm("Delete this transaction?")){S.tx=S.tx.filter(t=>t.id!==id);save();render()}return}
+  const row=e.target.closest("[data-edit]");if(row)openEdit(row.dataset.edit);
 };
 $("#prev").onclick=()=>{view=shift(view,-1);render()};
 $("#next").onclick=()=>{view=shift(view,1);render()};
