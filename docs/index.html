@@ -40,7 +40,11 @@ button{font:inherit;color:inherit;cursor:pointer}
 .cols{grid-template-columns:1fr;margin-top:12px}
 @media(min-width:860px){.cols{grid-template-columns:1.1fr .9fr}.stat .v{font-size:26px}}
 h2{font-size:13px;color:var(--mute);text-transform:uppercase;letter-spacing:.08em;margin:0 0 12px;font-weight:600}
-.tx{display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid var(--line)}
+.tx{display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid var(--line);touch-action:pan-y}
+.tx.swd{background:rgba(248,113,113,.2);border-radius:12px}
+.tx.swe{background:rgba(96,165,250,.2);border-radius:12px}
+.chips{display:flex;gap:8px;overflow-x:auto;margin:12px 0 0;padding-bottom:2px;-webkit-overflow-scrolling:touch}
+.chips button{flex:none;white-space:nowrap;background:var(--card);border:1px solid var(--line);border-radius:99px;padding:7px 12px;font-size:13px}
 .tx:first-of-type{border-top:0}
 .dot{width:36px;height:36px;border-radius:11px;display:grid;place-items:center;font-size:17px;flex:none;background:rgba(255,255,255,.07)}
 .tx .m{flex:1;min-width:0}
@@ -81,7 +85,7 @@ h2{font-size:13px;color:var(--mute);text-transform:uppercase;letter-spacing:.08e
 .sheet h3{margin:0 0 14px}
 label{display:block;color:var(--mute);font-size:12px;margin:12px 0 5px}
 input,select{width:100%;background:rgba(255,255,255,.06);border:1px solid var(--line);border-radius:12px;color:var(--text);
-  padding:12px;font:inherit;outline:none}
+  padding:12px;font:inherit;font-size:16px;outline:none}   /* 16px stops iPhone Safari zooming in when a field is tapped */
 input:focus,select:focus{border-color:var(--acc2)}
 select option{background:#121829}
 .seg{display:flex;background:rgba(255,255,255,.06);border-radius:12px;padding:3px;border:1px solid var(--line)}
@@ -148,6 +152,11 @@ svg text{fill:var(--mute);font-size:10px}
   <nav class="tabs"><button data-pg="home" class="on">Overview</button><button data-pg="budgets">Budgets</button></nav>
 
   <div id="pgHome">
+  <div class="card" id="safeCard" hidden style="margin-bottom:12px">
+    <small style="color:var(--mute)">Safe to spend today</small>
+    <div id="safeV" style="font-size:32px;font-weight:700;line-height:1.2"></div>
+    <div id="safeS" style="color:var(--mute);font-size:13px"></div>
+  </div>
   <div class="grid stats">
     <div class="card stat"><small>Income</small><div class="v in" id="sIn"></div></div>
     <div class="card stat"><small>Spent</small><div class="v out" id="sOut"></div></div>
@@ -162,7 +171,7 @@ svg text{fill:var(--mute);font-size:10px}
       <div class="card"><h2>Spending by category</h2><div id="donut"></div><div class="legend" id="legend"></div></div>
       <div class="card"><h2 id="trendTitle">Last 6 periods</h2><div id="trend"></div></div>
     </div>
-    <div class="card"><h2>Transactions <span style="text-transform:none;letter-spacing:0;font-weight:400">· tap to edit</span></h2>
+    <div class="card"><h2>Transactions <span style="text-transform:none;letter-spacing:0;font-weight:400">· tap or swipe</span></h2>
       <div class="filt"><input id="fq" type="search" placeholder="Search…" aria-label="Search transactions"><select id="fcat" aria-label="Filter by category"></select></div>
       <div id="fInfo"></div>
       <div id="list"></div></div>
@@ -189,6 +198,7 @@ svg text{fill:var(--mute);font-size:10px}
 <div class="sheet-bg" id="txSheet"><div class="sheet">
   <h3 id="sheetTitle">Add transaction</h3>
   <div class="seg" id="typeSeg"><button data-t="exp" class="on">Expense</button><button data-t="inc" class="inc">Income</button></div>
+  <div class="chips" id="recentBox" hidden></div>
   <label>Amount</label><input id="fAmt" type="number" inputmode="decimal" step="0.01" placeholder="0.00">
   <label>Category</label><select id="fCat"></select>
   <label>Date</label><input id="fDate" type="date">
@@ -456,6 +466,20 @@ function renderBudgets(R,by){
   $("#bNote").textContent=!rows.length?"":(cur&&daysLeft>0&&L>0?`${daysLeft} ${daysLeft===1?"day":"days"} left this ${perName()} · about ${money(L/daysLeft)}/day across all budgets`:"")
     +(over?`${cur&&daysLeft>0&&L>0?" · ":""}${over} over budget`:"");
 
+  // "safe to spend today" (Overview): what's left in your budgets after bills still to come, spread over the days left.
+  // Today's own spending comes off today's allowance; bills that auto-posted today are treated as already planned for.
+  const sc=$("#safeCard");
+  if(cur&&daysLeft>0&&rows.length){
+    const ts=dstr(t0);
+    let upcoming=0;
+    for(const r of S.rec)if(r.type==="exp"&&S.budgets[r.cat]>0)upcoming+=occurrences(r,R.b).filter(d=>d>ts&&d>=R.a).length*r.amt;
+    const st=periodTx(R).filter(t=>t.date===ts&&t.type==="exp"&&!t.cash&&!t.rid&&S.budgets[t.cat]>0).reduce((a,t)=>a+t.amt,0);
+    const y=Math.max(0,(B-Sp-upcoming+st)/daysLeft), left=y-st;
+    sc.hidden=false;
+    $("#safeV").textContent=money(left);$("#safeV").className=left<0?"out":"in";
+    $("#safeS").textContent=(left<0?`over today's ${money(y)} allowance`:`of ${money(y)} a day`)+` · ${daysLeft} ${daysLeft===1?"day":"days"} left`+(upcoming>0?` · after ${money(upcoming)} of bills still due`:"");
+  }else sc.hidden=true;
+
   // cards
   const C=2*Math.PI*26;
   $("#bCards").innerHTML=rows.length?rows.map(r=>{
@@ -520,7 +544,7 @@ function openBud(c,amt){
   $("#bAmtLbl").textContent="Limit per "+perName();
   $("#bAmt").value=bEdit?S.budgets[bEdit]:(amt||"");
   $("#bDel").hidden=!bEdit;
-  avgHint();open("#bSheet");setTimeout(()=>$("#bAmt").focus(),50);
+  avgHint();open("#bSheet");$("#bAmt").focus();
 }
 $("#bCat").onchange=avgHint;
 $("#bAvg").onclick=e=>{$("#bAmt").value=e.currentTarget.dataset.v};
@@ -547,14 +571,36 @@ function setType(t){
   $("#cashRow").hidden=t==="inc";if(t==="inc")$("#fCash").checked=false;
   document.querySelectorAll("#typeSeg button").forEach(b=>b.classList.toggle("on",b.dataset.t===t));
   $("#fCat").innerHTML=(t==="inc"?["Income","Other"]:EXP).map(c=>`<option value="${c}">${CATS[c][0]} ${nice(c)}</option>`).join("");
+  renderRecent();
 }
 document.querySelectorAll("#typeSeg button").forEach(b=>b.onclick=()=>setType(b.dataset.t));
 
+// recent entries of this type, one tap to reuse (not shown when editing)
+function renderRecent(){
+  const box=$("#recentBox");
+  if(editId){box.hidden=true;return}
+  const seen=new Set(),out=[];
+  for(let i=S.tx.length-1;i>=0&&out.length<4;i--){
+    const t=S.tx[i];if(t.type!==ftype||t.rid)continue;
+    const k=t.cat+"|"+(t.note||"")+"|"+t.amt+"|"+(t.cash?1:0);
+    if(seen.has(k))continue;seen.add(k);out.push(t);
+  }
+  box._items=out;box.hidden=!out.length;
+  box.innerHTML=out.map((t,i)=>`<button type="button" data-ri="${i}">${CATS[t.cat]?CATS[t.cat][0]:"📦"} ${esc(t.note||nice(t.cat))} · ${esc(money(t.amt))}</button>`).join("");
+}
+$("#recentBox").onclick=e=>{
+  const b=e.target.closest("[data-ri]");if(!b)return;
+  const t=$("#recentBox")._items[+b.dataset.ri];if(!t)return;
+  $("#fAmt").value=t.amt;$("#fCat").value=t.cat;$("#fNote").value=t.note||"";$("#fCash").checked=!!t.cash&&ftype==="exp";
+  $("#fAmt").focus();
+};
+
 function openTx(t,cat,cash){
   editId=null;setType(t);$("#fCash").checked=!!cash&&t==="exp";
-  if(cat&&[...$("#fCat").options].some(o=>o.value===cat))$("#fCat").value=cat;
+  const want=cat||(S.lastCat||{})[t];   // default to the category you used last time
+  if(want&&[...$("#fCat").options].some(o=>o.value===want))$("#fCat").value=want;
   $("#fAmt").value="";$("#fNote").value="";$("#fDate").value=today();
-  open("#txSheet");setTimeout(()=>$("#fAmt").focus(),50);
+  open("#txSheet");$("#fAmt").focus();   // focus synchronously: iPhone only opens the keypad from a direct tap
 }
 function openEdit(id){
   const t=S.tx.find(x=>x.id===id);if(!t)return;
@@ -563,7 +609,7 @@ function openEdit(id){
   $("#fAmt").value=t.amt;$("#fNote").value=t.note||"";$("#fDate").value=t.date;
   open("#txSheet");
 }
-$("#addRec").onclick=()=>{setRType("exp");setRFreq("month");$("#rAmt").value="";$("#rNote").value="";$("#rDate").value=today();open("#recSheet");setTimeout(()=>$("#rAmt").focus(),50)};
+$("#addRec").onclick=()=>{setRType("exp");setRFreq("month");$("#rAmt").value="";$("#rNote").value="";$("#rDate").value=today();open("#recSheet");$("#rAmt").focus()};
 $("#rSave").onclick=()=>{
   const amt=parseFloat($("#rAmt").value);
   if(!(amt>0))return toast("Enter an amount");
@@ -585,18 +631,49 @@ $("#fSave").onclick=()=>{
   const date=$("#fDate").value||today();
   const fields={type:ftype,amt:Math.round(amt*100)/100,cat:$("#fCat").value,date,note:$("#fNote").value.trim(),cash:ftype==="exp"&&$("#fCash").checked};
   const t=editId&&S.tx.find(x=>x.id===editId), edited=!!t;
-  if(t)Object.assign(t,fields);else S.tx.push({id:uid(),...fields});
+  if(t)Object.assign(t,fields);else{S.tx.push({id:uid(),...fields});S.lastCat=S.lastCat||{};S.lastCat[fields.type]=fields.cat}
   editId=null;
   save();
   view=new Date(date+"T00:00");
   close();render();toast(edited?"Saved":"Added");
 };
 $("#fAmt").addEventListener("keydown",e=>{if(e.key==="Enter")$("#fSave").click()});
+function delTx(id){if(confirm("Delete this transaction?")){S.tx=S.tx.filter(t=>t.id!==id);save();render()}}
+let swipedAt=0;
 $("#list").onclick=e=>{
+  if(Date.now()-swipedAt<500)return;   // ignore the tap a swipe can leave behind
   const id=e.target.dataset.del;
-  if(id){if(confirm("Delete this transaction?")){S.tx=S.tx.filter(t=>t.id!==id);save();render()}return}
+  if(id){delTx(id);return}
   const row=e.target.closest("[data-edit]");if(row)openEdit(row.dataset.edit);
 };
+// swipe a row: left = delete, right = edit (vertical scrolling is untouched)
+(function(){
+  const L=$("#list"),LIM=70;
+  let row=null,x0=0,y0=0,dx=0,axis=null;
+  L.addEventListener("touchstart",e=>{
+    const r=e.target.closest(".tx");if(!r||e.touches.length!==1){row=null;return}
+    row=r;x0=e.touches[0].clientX;y0=e.touches[0].clientY;dx=0;axis=null;r.style.transition="none";
+  },{passive:true});
+  L.addEventListener("touchmove",e=>{
+    if(!row)return;
+    const t=e.touches[0],mx=t.clientX-x0,my=t.clientY-y0;
+    if(!axis&&(Math.abs(mx)>8||Math.abs(my)>8))axis=Math.abs(mx)>Math.abs(my)?"x":"y";
+    if(axis!=="x")return;
+    dx=Math.max(-130,Math.min(130,mx));
+    row.style.transform=`translateX(${dx}px)`;
+    row.classList.toggle("swd",dx<-LIM);row.classList.toggle("swe",dx>LIM);
+  },{passive:true});
+  const end=()=>{
+    if(!row)return;
+    const r=row,d=dx,was=axis;row=null;
+    r.style.transition="transform .2s";r.style.transform="";r.classList.remove("swd","swe");
+    if(was!=="x")return;
+    swipedAt=Date.now();
+    const id=r.dataset.edit;
+    if(d<-LIM)delTx(id);else if(d>LIM)openEdit(id);
+  };
+  L.addEventListener("touchend",end);L.addEventListener("touchcancel",end);
+})();
 $("#prev").onclick=()=>{view=shift(view,-1);render()};
 $("#next").onclick=()=>{view=shift(view,1);render()};
 
